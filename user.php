@@ -165,7 +165,7 @@ class User implements \jsonSerializable, \Serializable
 		}
 	}
 
-	public static function restore($key = 'user')
+	public static function restore($key = 'user', $db_creds = null)
 	{
 		if (array_key_exists($key, $_SESSION)) {
 			return unserialize($_SESSION[$key]);
@@ -173,7 +173,7 @@ class User implements \jsonSerializable, \Serializable
 			$_SESSION[$key] = base64_decode($_COOKIE[$key]);
 			return unserialize($_SESSION[$key]);
 		} else {
-			return new self('config.json');
+			return new self($db_creds);
 		}
 	}
 
