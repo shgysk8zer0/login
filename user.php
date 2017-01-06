@@ -17,7 +17,7 @@ class User implements \jsonSerializable, \Serializable
 
 	const DATA_TABLE     = 'user_data';
 
-	private $id         = null;
+	public $id         = null;
 
 	public $username    = null;
 
