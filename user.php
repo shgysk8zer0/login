@@ -17,21 +17,23 @@ class User implements \jsonSerializable, \Serializable
 
 	const DATA_TABLE     = 'user_data';
 
-	public $id         = null;
+	const KEY            = 'user';
 
-	public $username    = null;
+	public $id           = null;
 
-	public $email       = null;
+	public $username     = null;
 
-	private $password   = null;
+	public $email        = null;
 
-	private $_pdo       = null;
+	private $password    = null;
 
-	private $_db_creds  = null;
+	private $_pdo        = null;
 
-	private $_user_data = array();
+	private $_db_creds   = null;
 
-	private $_tables    = array();
+	private $_user_data  = array();
+
+	private $_tables     = array();
 
 	public static $check_wp_pass = false;
 
@@ -142,6 +144,37 @@ class User implements \jsonSerializable, \Serializable
 		static::$_instances[$this->_db_creds] = $this;
 	}
 
+	public function setCookie($key = 'user')
+	{
+		return \setcookie(
+			$key,
+			base64_encode(serialize($this)),
+			strtotime('+1 month'),
+			'/',
+			$_SERVER['HTTP_HOST'],
+			array_key_exists('HTTPS', $_SERVER),
+			true
+		);
+	}
+
+	public function setSession($key = 'user')
+	{
+		$_SESSION[$key] = serialize($this);
+	}
+
+	public function logout($key = 'user')
+	{
+		if (array_key_exists($key, $_COOKIE)) {
+			\setcookie($key, null, 1);
+		}
+		unset($_COOKIE[$key], $_SESSION[$key]);
+		$this->id = null;
+		$this->username = null;
+		$this->password = null;
+		$this->_user_data = array();
+		return $this;
+	}
+
 	public function hasTable($table)
 	{
 		return in_array($table, $this->_tables);
@@ -175,24 +208,6 @@ class User implements \jsonSerializable, \Serializable
 		} else {
 			return new self($db_creds);
 		}
-	}
-
-	public function setCookie($key = 'user')
-	{
-		return \setcookie(
-			$key,
-			base64_encode(serialize($this)),
-			strtotime('+1 month'),
-			'/',
-			$_SERVER['HTTP_HOST'],
-			array_key_exists('HTTPS', $_SERVER),
-			true
-		);
-	}
-
-	public function setSession($key)
-	{
-		$_SESSION[$key] = serialize($this);
 	}
 
 	private function _getData()
