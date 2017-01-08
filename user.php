@@ -144,7 +144,7 @@ class User implements \jsonSerializable, \Serializable
 		static::$_instances[$this->_db_creds] = $this;
 	}
 
-	public function setCookie($key = 'user')
+	public function setCookie($key = self::KEY)
 	{
 		return \setcookie(
 			$key,
@@ -157,12 +157,12 @@ class User implements \jsonSerializable, \Serializable
 		);
 	}
 
-	public function setSession($key = 'user')
+	public function setSession($key = self::KEY)
 	{
 		$_SESSION[$key] = serialize($this);
 	}
 
-	public function logout($key = 'user')
+	public function logout($key = self::KEY)
 	{
 		if (array_key_exists($key, $_COOKIE)) {
 			\setcookie($key, null, 1);
