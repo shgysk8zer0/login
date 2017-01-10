@@ -134,20 +134,22 @@ class User implements \jsonSerializable, \Serializable
 	public function unserialize($data)
 	{
 		$data = unserialize($data);
-		static::$expires = $data['expires'];
-		unset($data['expires']);
-		$this->_db_creds = $data['db_creds'];
-		$this->_pdo = Core\PDO::load($this->_db_creds);
-		$this->_tables = $data['tables'];
+		$data = new \ArrayObject($data, \ArrayObject::ARRAY_AS_PROPS);
+		if (isset($data->username, $data->expires, $data->db_creds, $data->tables)) {
+			static::$expires = $data->expires;
+			unset($data->expires);
+			$this->_db_creds = $data->db_creds;
+			$this->_pdo = Core\PDO::load($this->_db_creds);
+			$this->_tables = $data->tables;
 
-		$stm = $this->_pdo->prepare($this->_getQuery());
-		$stm->bindParam(':user', $data['username'], \PDO::PARAM_STR);
-		if ($stm->execute()) {
-			$data = $stm->fetch(\PDO::FETCH_ASSOC);
-			$this->_setData($data);
+			$stm = $this->_pdo->prepare($this->_getQuery());
+			$stm->bindParam(':user', $data->username, \PDO::PARAM_STR);
+			if ($stm->execute()) {
+				$data = $stm->fetch(\PDO::FETCH_ASSOC);
+				$this->_setData($data);
+			}
+			static::$_instances[$this->_db_creds] = $this;
 		}
-
-		static::$_instances[$this->_db_creds] = $this;
 	}
 
 	public function setCookie($key = self::KEY)
@@ -206,23 +208,16 @@ class User implements \jsonSerializable, \Serializable
 
 	public static function restore($key = 'user', $db_creds = null)
 	{
-		try {
-			if (array_key_exists($key, $_COOKIE)) {
-				$user = unserialize(base64_decode($_COOKIE[$key]));
-				$_SESSION[$key] = base64_encode($_COOKIE[$key]);
-			} elseif (array_key_exists($key, $_SESSION)) {
-				$user = unserialize($_SESSION[$key]);
-			} else {
-				$user = new self($db_creds);
-			}
-			if ($user::$expires < time()) {
-				throw new \Exception('Login cookie expired');
-			}
-		} catch(\Exception $e) {
-			$user = new self($db_creds);
-		} finally {
-			return $user;
+		if (array_key_exists($key, $_COOKIE)) {
+			$_SESSION[$key] = @base64_decode($_COOKIE[$key]);
+			$user = @unserialize($_SESSION[$key]);
+		} elseif (array_key_exists($key, $_SESSION)) {
+			$user = @unserialize($_SESSION[$key]);
 		}
+		if (!is_object($user) or $user::$expires < time()) {
+			$user = new self($db_creds);
+		}
+		return $user;
 	}
 
 	private function _getData()
