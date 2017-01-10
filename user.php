@@ -39,6 +39,8 @@ class User implements \jsonSerializable, \Serializable
 
 	private static $_instances = array();
 
+	public static  $expires = '+1 month';
+
 	final static public function load($config)
 	{
 		if (! array_key_exists($config, static::$_instances)) {
@@ -120,16 +122,20 @@ class User implements \jsonSerializable, \Serializable
 
 	public function serialize()
 	{
+		$expires = strtotime(static::$expires);
 		return serialize([
 			'username' => $this->username,
 			'tables'   => $this->_tables,
 			'db_creds' => $this->_db_creds,
+			'expires'  => $expires,
 		]);
 	}
 
 	public function unserialize($data)
 	{
 		$data = unserialize($data);
+		static::$expires = $data['expires'];
+		unset($data['expires']);
 		$this->_db_creds = $data['db_creds'];
 		$this->_pdo = Core\PDO::load($this->_db_creds);
 		$this->_tables = $data['tables'];
@@ -149,7 +155,7 @@ class User implements \jsonSerializable, \Serializable
 		return \setcookie(
 			$key,
 			base64_encode(serialize($this)),
-			strtotime('+1 month'),
+			strtotime(static::$expires),
 			'/',
 			$_SERVER['HTTP_HOST'],
 			array_key_exists('HTTPS', $_SERVER),
@@ -200,13 +206,22 @@ class User implements \jsonSerializable, \Serializable
 
 	public static function restore($key = 'user', $db_creds = null)
 	{
-		if (array_key_exists($key, $_SESSION)) {
-			return unserialize($_SESSION[$key]);
-		} elseif(array_key_exists($key, $_COOKIE)) {
-			$_SESSION[$key] = base64_decode($_COOKIE[$key]);
-			return unserialize($_SESSION[$key]);
-		} else {
-			return new self($db_creds);
+		try {
+			if (array_key_exists($key, $_COOKIE)) {
+				$user = unserialize(base64_decode($_COOKIE[$key]));
+				$_SESSION[$key] = base64_encode($_COOKIE[$key]);
+			} elseif (array_key_exists($key, $_SESSION)) {
+				$user = unserialize($_SESSION[$key]);
+			} else {
+				$user = new self($db_creds);
+			}
+			if ($user::$expires < time()) {
+				throw new \Exception('Login cookie expired');
+			}
+		} catch(\Exception $e) {
+			$user = new self($db_creds);
+		} finally {
+			return $user;
 		}
 	}
 
