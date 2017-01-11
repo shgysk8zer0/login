@@ -49,7 +49,7 @@ class User implements \jsonSerializable, \Serializable
 		return static::$_instances[$config];
 	}
 
-	public function __construct($creds)
+	public function __construct($creds = 'connect.json')
 	{
 		$this->_db_creds = $creds;
 		$this->_pdo = \shgysk8zer0\Core\PDO::load($creds);
@@ -213,8 +213,10 @@ class User implements \jsonSerializable, \Serializable
 			$user = @unserialize($_SESSION[$key]);
 		} elseif (array_key_exists($key, $_SESSION)) {
 			$user = @unserialize($_SESSION[$key]);
+		} else {
+			$user = new self();
 		}
-		if (!is_object($user) or $user::$expires < time()) {
+		if (is_null($user) or !is_object($user) or $user::$expires < time()) {
 			$user = new self($db_creds);
 		}
 		return $user;
