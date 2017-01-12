@@ -123,12 +123,13 @@ class User implements \jsonSerializable, \Serializable
 	public function serialize()
 	{
 		$expires = strtotime(static::$expires);
-		return serialize([
+		$data = [
 			'username' => $this->username,
 			'tables'   => $this->_tables,
 			'db_creds' => $this->_db_creds,
 			'expires'  => $expires,
-		]);
+		];
+		return serialize($data);
 	}
 
 	public function unserialize($data)
@@ -154,10 +155,11 @@ class User implements \jsonSerializable, \Serializable
 
 	public function setCookie($key = self::KEY)
 	{
-		return \setcookie(
+		$cookie = base64_encode(serialize($this));
+		return setcookie(
 			$key,
-			base64_encode(serialize($this)),
-			strtotime(static::$expires),
+			$cookie,
+			strtotime($this::$expires),
 			'/',
 			$_SERVER['HTTP_HOST'],
 			array_key_exists('HTTPS', $_SERVER),
@@ -167,13 +169,13 @@ class User implements \jsonSerializable, \Serializable
 
 	public function setSession($key = self::KEY)
 	{
-		$_SESSION[$key] = serialize($this);
+		$_SESSION[$key] = @serialize($this);
 	}
 
 	public function logout($key = self::KEY)
 	{
 		if (array_key_exists($key, $_COOKIE)) {
-			\setcookie($key, null, 1);
+			setcookie($key, null, 1);
 		}
 		unset($_COOKIE[$key], $_SESSION[$key]);
 		$this->id = null;
@@ -206,20 +208,53 @@ class User implements \jsonSerializable, \Serializable
 		}
 	}
 
-	public static function restore($key = 'user', $db_creds = null)
+	public static function restore($key = self::KEY, $db_creds = null)
 	{
+		if (is_null($db_creds)) {
+			trigger_error(sprintf('No db creds given in %s', __METHOD__));
+		}
+		if (array_key_exists($db_creds, static::$_instances)) {
+			return static::$_instances[$db_creds];
+		}
 		if (array_key_exists($key, $_COOKIE)) {
 			$_SESSION[$key] = @base64_decode($_COOKIE[$key]);
 			$user = @unserialize($_SESSION[$key]);
 		} elseif (array_key_exists($key, $_SESSION)) {
 			$user = @unserialize($_SESSION[$key]);
 		} else {
-			$user = new self();
+			$user = new self($db_creds);
+			if (
+				array_key_exists('PHP_AUTH_USER', $_SERVER)
+				and array_key_exists('PHP_AUTH_PW', $_SERVER)
+			) {
+				$user($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']);
+			}
 		}
-		if (is_null($user) or !is_object($user) or $user::$expires < time()) {
+
+		if (is_null($user) or static::_isExpired($user::$expires)) {
+			if (array_key_exists($key, $_COOKIE)) {
+				setcookie($key, null, 1);
+				unset($_COOKIE[$key]);
+			}
+			if (array_key_exists($key, $_SESSION)) {
+				unset($_SESSION[$key]);
+			}
 			$user = new self($db_creds);
 		}
+		static::$_instances[$db_creds] = $user;
 		return $user;
+	}
+
+	private static function _isExpired($time)
+	{
+		$now = new \DateTime('now');
+		if (strval(@intval($time)) == $time) {
+			return new \DateTime("@{$time}") < $now;
+		} elseif (is_string($time)) {
+			return new \DateTime($time) < $now;
+		} else {
+			return true;
+		}
 	}
 
 	private function _getData()
