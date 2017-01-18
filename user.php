@@ -175,7 +175,15 @@ class User implements \jsonSerializable, \Serializable
 	public function logout($key = self::KEY)
 	{
 		if (array_key_exists($key, $_COOKIE)) {
-			setcookie($key, null, 1);
+			setcookie(
+				$key,
+				null,
+				1,
+				'/',
+				$_SERVER['HTTP_HOST'],
+				array_key_exists('HTTPS', $_SERVER),
+				true
+			);
 		}
 		unset($_COOKIE[$key], $_SESSION[$key]);
 		$this->id = null;
