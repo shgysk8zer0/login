@@ -6,10 +6,13 @@ use \shgysk8zer0\Core_API as API;
 
 use \shgysk8zer0\Core as Core;
 
+use \shgysk8zer0\PHPCrypt as Crypto;
+
 class User implements \jsonSerializable, \Serializable
 {
 	use WP_Pass;
-	use Passwords;
+	use Crypto\Traits\Password;
+	use Crypto\Traits\AES;
 
 	const MAGIC_PROPERTY = '_user_data';
 
@@ -64,15 +67,15 @@ class User implements \jsonSerializable, \Serializable
 
 			if (
 				array_key_exists('password', $data)
-				and ($this->_passwordVerify($password, $data['password']))
+				and ($this->passwordVerify($password, $data['password']))
 			) {
 				$this->_setData($data);
 				return true;
 			} elseif (
 				array_key_exists('password', $data) and static::$check_wp_pass === true
-				and ($this->_passwordVerify($password, $data['password']))
+				and ($this->passwordVerify($password, $data['password']))
 			) {
-				$hash = $this->_passwordHash($password);
+				$hash = $this->passwordHash($password);
 				$update = $pdo->prepare("UPDATE `users` SET `password` = :hash WHERE `username` = :user LIMIT 1;");
 				$update->bindParam(':hash', $hash);
 				$update->bindParam(':user', $data['username']);
@@ -134,9 +137,9 @@ class User implements \jsonSerializable, \Serializable
 
 	public function unserialize($data)
 	{
-		$data = unserialize($data);
+		$data = @unserialize($data);
 		$data = new \ArrayObject($data, \ArrayObject::ARRAY_AS_PROPS);
-		if (isset($data->username, $data->expires, $data->db_creds, $data->tables)) {
+		if (isset($data, $data->username, $data->expires, $data->db_creds, $data->tables)) {
 			static::$expires = $data->expires;
 			unset($data->expires);
 			$this->_db_creds = $data->db_creds;
@@ -153,39 +156,29 @@ class User implements \jsonSerializable, \Serializable
 		}
 	}
 
-	public function setCookie($key = self::KEY)
+	public function setCookie($key = self::KEY, $crypto_pwd = null)
 	{
-		$cookie = base64_encode(serialize($this));
-		return setcookie(
-			$key,
-			$cookie,
-			strtotime($this::$expires),
-			'/',
-			$_SERVER['HTTP_HOST'],
-			array_key_exists('HTTPS', $_SERVER),
-			true
-		);
+		if (is_string($crypto_pwd)) {
+			$cookie = static::encrypt(@serialize($this), $crypto_pwd);
+		} else {
+			$cookie = base64_encode(@serialize($this));
+		}
+		$this->_cookie($key, $cookie, $this::$expires);
+		return $this;
 	}
 
 	public function setSession($key = self::KEY)
 	{
 		$_SESSION[$key] = @serialize($this);
+		return $this;
 	}
 
 	public function logout($key = self::KEY)
 	{
 		if (array_key_exists($key, $_COOKIE)) {
-			setcookie(
-				$key,
-				null,
-				1,
-				'/',
-				$_SERVER['HTTP_HOST'],
-				array_key_exists('HTTPS', $_SERVER),
-				true
-			);
+			$this->_cookie($key, null, 1);
 		}
-		unset($_COOKIE[$key], $_SESSION[$key]);
+		unset($_SESSION[$key]);
 		$this->id = null;
 		$this->username = null;
 		$this->password = null;
@@ -216,7 +209,7 @@ class User implements \jsonSerializable, \Serializable
 		}
 	}
 
-	public static function restore($key = self::KEY, $db_creds = null)
+	public static function restore($key = self::KEY, $db_creds = null, $crypto_pwd = null)
 	{
 		if (is_null($db_creds)) {
 			trigger_error(sprintf('No db creds given in %s', __METHOD__));
@@ -225,8 +218,12 @@ class User implements \jsonSerializable, \Serializable
 			return static::$_instances[$db_creds];
 		}
 		if (array_key_exists($key, $_COOKIE)) {
-			$_SESSION[$key] = @base64_decode($_COOKIE[$key]);
-			$user = @unserialize($_SESSION[$key]);
+			if (is_string($crypto_pwd)) {
+				$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
+			} else {
+				$user = @unserialize(base64_decode($_COOKIE[$key]));
+			}
+			$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
 		} elseif (array_key_exists($key, $_SESSION)) {
 			$user = @unserialize($_SESSION[$key]);
 		} else {
@@ -251,6 +248,25 @@ class User implements \jsonSerializable, \Serializable
 		}
 		static::$_instances[$db_creds] = $user;
 		return $user;
+	}
+
+	private function _cookie($key, $value = null, $expires = 1)
+	{
+		if (isset($value)) {
+			$_COOKIE[$key] = $value;
+		} else {
+			unset($_COOKIE[$key]);
+		}
+
+		return setcookie(
+			$key,
+			$value,
+			is_string($expires) ? strtotime($expires) : $expires,
+			'/',
+			$_SERVER['HTTP_HOST'],
+			array_key_exists('HTTPS', $_SERVER),
+			true
+		);
 	}
 
 	private static function _isExpired($time)
