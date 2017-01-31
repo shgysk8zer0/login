@@ -221,41 +221,45 @@ class User implements \jsonSerializable, \Serializable
 	public static function restore($key = self::KEY, $db_creds = null, $crypto_pwd = null)
 	{
 		try {
-			if (is_null($db_creds)) {
-				trigger_error(sprintf('No db creds given in %s', __METHOD__));
+			if (!is_string($db_creds)) {
+				throw new \InvalidArgumentException('Trying to restore without database credentials.');
 			} elseif (array_key_exists($db_creds, static::$_instances)) {
-				return static::$_instances[$db_creds];
-			} else if (array_key_exists($key, $_COOKIE)) {
-				if (is_string($crypto_pwd)) {
-					$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
-				} else {
-					$user = @unserialize(base64_decode($_COOKIE[$key]));
-				}
-				$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
-			} elseif (array_key_exists($key, $_SESSION)) {
+				$user = static::$_instances[$db_creds];
+			} elseif (session_status() === PHP_SESSION_ACTIVE and array_key_exists($key, $_SESSION)) {
 				$user = @unserialize($_SESSION[$key]);
+				if (!$user) {
+					unset($_SESSION[$key]);
+					throw new \Exception('Unable to restore from session.');
+				}
+			} elseif (array_key_exists($key, $_COOKIE)) {
+				if (is_string($crypto_pwd)) {
+					$user = @unserialize(@static::decrypt($_COOKIE[$key], $crypto_pwd));
+				} else {
+					$user = @unserialize(@base64_decode($_COOKIE[$key]));
+				}
+				if (!$user) {
+					static::_cookie($key, null, 1);
+					unset($_COOKIE[$key]);
+					throw new \Exception('Unable to restore from cookie.');
+				} elseif (session_status() === PHP_SESSION_ACTIVE) {
+					$_SESSION[$key] = @serialize($user);
+				}
 			} else {
 				$user = new self($db_creds);
 			}
-
-			if (!@is_object($user) or !$user instanceof self or static::_isExpired($user::$expires)) {
-				if (array_key_exists($key, $_COOKIE)) {
-					static::_cookie($key, null, 1);
-					unset($_COOKIE[$key]);
-				}
-				if (array_key_exists($key, $_SESSION)) {
-					unset($_SESSION[$key]);
-				}
-				$user = new self($db_creds);
-			}
-			static::$_instances[$db_creds] = $user;
-		} catch(\Exception $e) {
-			$user = new self($db_creds);
-			$user->logout();
-		} catch(\Error $e) {
-			$user = new self($db_creds);
-			$user->logout();
+		} catch (\Exception $e) {
+			trigger_error($e->getMessage());
+		} catch (\Error $e) {
+			trigger_error($e->getMessage());
 		} finally {
+			if (is_object($user) and $user instanceof self and !static::_isExpired($user::$expires)) {
+				static::$_instances[$db_creds] = $user;
+			} else {
+				$user = static::$_instances[$db_creds] = new self($db_creds);
+				if (session_status() === PHP_SESSION_ACTIVE) {
+					$_SESSION[$key] = @serialize($user);
+				}
+			}
 			return $user;
 		}
 	}
