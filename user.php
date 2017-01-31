@@ -56,6 +56,12 @@ class User implements \jsonSerializable, \Serializable
 	{
 		$this->_db_creds = $creds;
 		$this->_pdo = \shgysk8zer0\Core\PDO::load($creds);
+		if (
+			array_key_exists('PHP_AUTH_USER', $_SERVER)
+			and array_key_exists('PHP_AUTH_PW', $_SERVER)
+		) {
+			$this($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']);
+		}
 	}
 
 	public function __invoke($user, $password)
@@ -143,15 +149,18 @@ class User implements \jsonSerializable, \Serializable
 			static::$expires = $data->expires;
 			unset($data->expires);
 			$this->_db_creds = $data->db_creds;
-			$this->_pdo = Core\PDO::load($this->_db_creds);
-			$this->_tables = $data->tables;
-
+			$this->_pdo      = Core\PDO::load($this->_db_creds);
+			$this->_tables   = $data->tables;
 			$stm = $this->_pdo->prepare($this->_getQuery());
 			$stm->bindParam(':user', $data->username, \PDO::PARAM_STR);
+
 			if ($stm->execute()) {
 				$data = $stm->fetch(\PDO::FETCH_ASSOC);
-				$this->_setData($data);
+				empty($data) ? $this->logout() : $this->_setData($data);
+			} else {
+				$this->logout();
 			}
+
 			static::$_instances[$this->_db_creds] = $this;
 		}
 	}
@@ -213,11 +222,9 @@ class User implements \jsonSerializable, \Serializable
 	{
 		if (is_null($db_creds)) {
 			trigger_error(sprintf('No db creds given in %s', __METHOD__));
-		}
-		if (array_key_exists($db_creds, static::$_instances)) {
+		} elseif (array_key_exists($db_creds, static::$_instances)) {
 			return static::$_instances[$db_creds];
-		}
-		if (array_key_exists($key, $_COOKIE)) {
+		} else if (array_key_exists($key, $_COOKIE)) {
 			if (is_string($crypto_pwd)) {
 				$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
 			} else {
@@ -228,17 +235,11 @@ class User implements \jsonSerializable, \Serializable
 			$user = @unserialize($_SESSION[$key]);
 		} else {
 			$user = new self($db_creds);
-			if (
-				array_key_exists('PHP_AUTH_USER', $_SERVER)
-				and array_key_exists('PHP_AUTH_PW', $_SERVER)
-			) {
-				$user($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']);
-			}
 		}
 
 		if (is_null($user) or static::_isExpired($user::$expires)) {
 			if (array_key_exists($key, $_COOKIE)) {
-				setcookie($key, null, 1);
+				$this->_cookie($key, null, 1);
 				unset($_COOKIE[$key]);
 			}
 			if (array_key_exists($key, $_SESSION)) {
@@ -284,9 +285,9 @@ class User implements \jsonSerializable, \Serializable
 	private function _getData()
 	{
 		return array_merge([
-			'id' => $this->id,
+			'id'       => $this->id,
 			'username' => $this->username,
-			'email' => $this->email,
+			'email'    => $this->email,
 		], $this->{self::MAGIC_PROPERTY});
 	}
 
