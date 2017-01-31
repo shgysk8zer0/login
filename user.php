@@ -220,35 +220,44 @@ class User implements \jsonSerializable, \Serializable
 
 	public static function restore($key = self::KEY, $db_creds = null, $crypto_pwd = null)
 	{
-		if (is_null($db_creds)) {
-			trigger_error(sprintf('No db creds given in %s', __METHOD__));
-		} elseif (array_key_exists($db_creds, static::$_instances)) {
-			return static::$_instances[$db_creds];
-		} else if (array_key_exists($key, $_COOKIE)) {
-			if (is_string($crypto_pwd)) {
+		try {
+			if (is_null($db_creds)) {
+				trigger_error(sprintf('No db creds given in %s', __METHOD__));
+			} elseif (array_key_exists($db_creds, static::$_instances)) {
+				return static::$_instances[$db_creds];
+			} else if (array_key_exists($key, $_COOKIE)) {
+				if (is_string($crypto_pwd)) {
+					$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
+				} else {
+					$user = @unserialize(base64_decode($_COOKIE[$key]));
+				}
 				$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
+			} elseif (array_key_exists($key, $_SESSION)) {
+				$user = @unserialize($_SESSION[$key]);
 			} else {
-				$user = @unserialize(base64_decode($_COOKIE[$key]));
+				$user = new self($db_creds);
 			}
-			$user = @unserialize(static::decrypt($_COOKIE[$key], $crypto_pwd));
-		} elseif (array_key_exists($key, $_SESSION)) {
-			$user = @unserialize($_SESSION[$key]);
-		} else {
-			$user = new self($db_creds);
-		}
 
-		if (is_null($user) or static::_isExpired($user::$expires)) {
-			if (array_key_exists($key, $_COOKIE)) {
-				$this->_cookie($key, null, 1);
-				unset($_COOKIE[$key]);
+			if (!@is_object($user) or !$user instanceof self or static::_isExpired($user::$expires)) {
+				if (array_key_exists($key, $_COOKIE)) {
+					$this->_cookie($key, null, 1);
+					unset($_COOKIE[$key]);
+				}
+				if (array_key_exists($key, $_SESSION)) {
+					unset($_SESSION[$key]);
+				}
+				$user = new self($db_creds);
 			}
-			if (array_key_exists($key, $_SESSION)) {
-				unset($_SESSION[$key]);
-			}
+			static::$_instances[$db_creds] = $user;
+		} catch(\Exception $e) {
 			$user = new self($db_creds);
+			$user->logout();
+		} catch(\Error $e) {
+			$user = new self($db_creds);
+			$user->logout();
+		} finally {
+			return $user;
 		}
-		static::$_instances[$db_creds] = $user;
-		return $user;
 	}
 
 	private function _cookie($key, $value = null, $expires = 1)
