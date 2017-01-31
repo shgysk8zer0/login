@@ -172,7 +172,7 @@ class User implements \jsonSerializable, \Serializable
 		} else {
 			$cookie = base64_encode(@serialize($this));
 		}
-		$this->_cookie($key, $cookie, $this::$expires);
+		static::_cookie($key, $cookie, $this::$expires);
 		return $this;
 	}
 
@@ -185,7 +185,7 @@ class User implements \jsonSerializable, \Serializable
 	public function logout($key = self::KEY)
 	{
 		if (array_key_exists($key, $_COOKIE)) {
-			$this->_cookie($key, null, 1);
+			static::_cookie($key, null, 1);
 		}
 		unset($_SESSION[$key]);
 		$this->id = null;
@@ -240,7 +240,7 @@ class User implements \jsonSerializable, \Serializable
 
 			if (!@is_object($user) or !$user instanceof self or static::_isExpired($user::$expires)) {
 				if (array_key_exists($key, $_COOKIE)) {
-					$this->_cookie($key, null, 1);
+					static::_cookie($key, null, 1);
 					unset($_COOKIE[$key]);
 				}
 				if (array_key_exists($key, $_SESSION)) {
@@ -260,7 +260,7 @@ class User implements \jsonSerializable, \Serializable
 		}
 	}
 
-	private function _cookie($key, $value = null, $expires = 1)
+	private static function _cookie($key, $value = null, $expires = 1)
 	{
 		if (isset($value)) {
 			$_COOKIE[$key] = $value;
