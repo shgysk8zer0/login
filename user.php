@@ -240,7 +240,8 @@ class User implements \jsonSerializable, \Serializable
 	 */
 	public function hasPermission(String $permission): Bool
 	{
-		return $this->_permissions->{$permission} === '1' ?? false;
+		return @isset($this->_permissions->{$permission})
+			and $this->_permissions->{$permission} === '1';
 	}
 
 	/**
@@ -414,12 +415,18 @@ class User implements \jsonSerializable, \Serializable
 
 	/**
 	 * Does timestamp comparision
-	 * @param  Int   $expires Expiration timestamp
-	 * @return Bool           Whether or not it is less than current time
+	 * @param  Mixed   $expires Expiration timestamp or date string
+	 * @return Bool             Whether or not it is less than current time
 	 */
-	private static function _isExpired(Int $expires): Bool
+	private static function _isExpired($expires): Bool
 	{
-		return $expires < time();
+		if (is_int($expires)) {
+			return $expires < time();
+		} elseif (is_string($expires)) {
+			return strtotime($expires) < time();
+		} else {
+			return true;
+		}
 	}
 
 	/**
