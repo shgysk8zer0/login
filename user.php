@@ -131,6 +131,36 @@ class User implements \jsonSerializable, \Serializable
 	}
 
 	/**
+	 * Update password for user
+	 * @param  String $password The new password
+	 * @return Bool             Whether or not the transaction was successful
+	 */
+	public function updatePassword(String $password): Bool
+	{
+		$this->_pdo->beginTransaction();
+		try {
+			$stm = $this->_pdo->prepare(
+				'UPDATE `users`
+				SET `password`   = :pass
+				WHERE `username` = :user
+				LIMIT 1;'
+			);
+			$stm->bindParam(':user', $this->username);
+			$hash = static::passwordHash($password);
+			$stm->bindParam(':pass', $hash);
+			if ($stm->execute() and $this($this->username, $password)) {
+				return $this->_pdo->commit();
+			} else {
+				throw new \RuntimeException('Error updating password');
+			}
+		} catch (\Throwable $e) {
+			$this->_pdo->rollBack();
+			trigger_error($e->getMessage());
+			return false;
+		}
+	}
+
+	/**
 	 * Restore login from `$_COOKIE` or `$_SESSION`
 	 * @param  String $key        Name of key in `$_COOKIE` or `$_SESSION`
 	 * @param  String $db_creds   path/to/db_creds.json
