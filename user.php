@@ -20,17 +20,16 @@
  */
 namespace shgysk8zer0\Login;
 
-use \shgysk8zer0\Core_API as API;
-
-use \shgysk8zer0\Core;
-
-use \shgysk8zer0\PHPCrypt as Crypto;
+use \shgysk8zer0\Core\{PDO};
+use \shgysk8zer0\PHPCrypt\{Traits\AES, Traits\Password};
+use \stdClass;
+use \ArrayObject;
 
 class User implements \jsonSerializable, \Serializable
 {
 	use WP_Pass;
-	use Crypto\Traits\Password;
-	use Crypto\Traits\AES;
+	use Password;
+	use AES;
 
 	const MAGIC_PROPERTY = '_user_data';
 
@@ -81,10 +80,10 @@ class User implements \jsonSerializable, \Serializable
 	 * Create a new instance from database credentials file
 	 * @param string $creds path/to/creds.json
 	 */
-	public function __construct(String $creds = Core\PDO::DEFAULT_CON)
+	public function __construct(String $creds = PDO::DEFAULT_CON)
 	{
 		$this->_db_creds = $creds;
-		$this->_pdo = \shgysk8zer0\Core\PDO::load($creds);
+		$this->_pdo = PDO::load($creds);
 		if (
 			array_key_exists('PHP_AUTH_USER', $_SERVER)
 			and array_key_exists('PHP_AUTH_PW', $_SERVER)
@@ -102,19 +101,17 @@ class User implements \jsonSerializable, \Serializable
 	public function __invoke(String $user, String $password): Bool
 	{
 		$stm = $this->_pdo->prepare($this->_getQuery());
-		$stm->bindParam(':user', $user, \PDO::PARAM_STR);
-		if ($stm->execute()) {
-			$data = $stm->fetch(\PDO::FETCH_ASSOC);
-
+		$stm->bindParam(':user', $user, PDO::PARAM_STR);
+		if ($stm->execute() and $data = $stm->fetchObject()) {
 			if (
-				array_key_exists('password', $data)
-				and ($this->passwordVerify($password, $data['password']))
+				isset($data->password)
+				and ($this->passwordVerify($password, $data->password))
 			) {
 				$this->_setData($data);
 				return true;
 			} elseif (
-				static::$check_wp_pass === true and array_key_exists('password', $data)
-				and ($this->CheckPassword($password, $data['password']))
+				static::$check_wp_pass === true and isset($data->password)
+				and ($this->CheckPassword($password, $data->password))
 			) {
 				$hash = $this->passwordHash($password);
 				$update = $pdo->prepare(
@@ -124,9 +121,9 @@ class User implements \jsonSerializable, \Serializable
 					LIMIT 1;'
 				);
 				$update->bindParam(':hash', $hash);
-				$update->bindParam(':user', $data['username']);
+				$update->bindParam(':user', $data->username);
 				if ($update->execute()) {
-					$data['password'] = $hash;
+					$data->password = $hash;
 					$this->_setData($data);
 					return true;
 				} else {
@@ -193,7 +190,10 @@ class User implements \jsonSerializable, \Serializable
 	 */
 	public function serialize(): String
 	{
-		$expires = is_string(static::$expires) ? strtotime(static::$expires) : static::$expires;
+		$expires = is_string(static::$expires)
+			? strtotime(static::$expires)
+			: static::$expires;
+
 		$data = [
 			'username' => $this->username,
 			'tables'   => $this->_tables,
@@ -211,26 +211,43 @@ class User implements \jsonSerializable, \Serializable
 	public function unserialize($data)
 	{
 		$data = @unserialize($data);
-		$data = new \ArrayObject($data, \ArrayObject::ARRAY_AS_PROPS);
+		$data = new ArrayObject($data, ArrayObject::ARRAY_AS_PROPS);
 		if (isset($data, $data->username, $data->expires, $data->db_creds, $data->tables)) {
 			static::$expires = $data->expires;
 			unset($data->expires);
 			$this->_db_creds = $data->db_creds;
-			$this->_pdo      = Core\PDO::load($this->_db_creds);
+			$this->_pdo      = PDO::load($this->_db_creds);
 			$this->_tables   = $data->tables;
 			$stm = $this->_pdo->prepare($this->_getQuery());
-			$stm->bindParam(':user', $data->username, \PDO::PARAM_STR);
+			$stm->bindParam(':user', $data->username, PDO::PARAM_STR);
 
-			if ($stm->execute()) {
-				$data = $stm->fetch(\PDO::FETCH_ASSOC);
-				empty($data) ? $this->logout() : $this->_setData($data);
+			if ($stm->execute() and $data = $stm->fetchObject()) {
+				$this->_setData($data);
 			} else {
 				$this->logout();
 			}
-
-
 			static::$_instances[$this->_db_creds] = $this;
 		}
+	}
+
+	/**
+	 * Create a user by searching for username or email
+	 * @param  String $db_creds Datbase credentials file
+	 * @param  String $query    Username or email
+	 * @return self
+	 */
+	public static function search(String $db_creds, String $query): self
+	{
+		$user = new self($db_creds);
+		$stm = $user->_pdo->prepare($user->_getQuery());
+		$stm->bindParam(':user', $query);
+		$stm->execute();
+
+		if ($data = $stm->fetchObject()) {
+			$user->_setData($data);
+			unset($user->password, $user->status);
+		}
+		return $user;
 	}
 
 	/**
@@ -338,12 +355,12 @@ class User implements \jsonSerializable, \Serializable
 	 */
 	public static function restore(
 		String $key        = self::KEY,
-		String $db_creds   = Core\PDO::DEFAULT_CON,
+		String $db_creds   = PDO::DEFAULT_CON,
 		String $crypto_pwd = null
 	): self
 	{
 		try {
-			if (!is_string($db_creds)) {
+			if (! is_string($db_creds)) {
 				throw new \InvalidArgumentException('Trying to restore without database credentials.');
 			} elseif (array_key_exists($db_creds, static::$_instances)) {
 				$user = static::$_instances[$db_creds];
@@ -446,15 +463,15 @@ class User implements \jsonSerializable, \Serializable
 	 * Private method for setting data
 	 * @param Array $data Data, such as from a SQL query
 	 */
-	private function _setData(Array $data)
+	private function _setData(stdClass $data)
 	{
-		$this->id       = $data['id'];
-		$this->username = $data['username'];
-		$this->email    = $data['email'];
-		$this->password = $data['password'];
-		unset($data['id'] ,$data['username'], $data['email'], $data['password']);
-		$this->_permissions = $this->_getPermsissions($data['status']);
-		$this->{self::MAGIC_PROPERTY} = $data;
+		$this->id       = $data->id;
+		$this->username = $data->username;
+		$this->email    = $data->email;
+		$this->password = $data->password;
+		unset($data->id ,$data->username, $data->email, $data->password);
+		$this->_permissions = $this->_getPermsissions($data->status);
+		$this->{self::MAGIC_PROPERTY} = get_object_vars($data);
 	}
 
 	/**
@@ -462,16 +479,20 @@ class User implements \jsonSerializable, \Serializable
 	 * @param  Int       $role_id `subscribers`.`status`
 	 * @return stdClass           {"$permissionName": "1" || "0", ...}
 	 */
-	private function _getPermsissions(Int $role_id): \stdClass
+	private function _getPermsissions(Int $role_id): stdClass
 	{
 		$stm = $this->_pdo->prepare(
-			'SELECT * FROM `permissions`
-			WHERE `id` = :role LIMIT 1;'
+			'SELECT *
+			FROM `permissions`
+			WHERE `id` = :role
+			LIMIT 1;'
 		);
 		$stm->bindParam(':role', $role_id);
-		$stm->execute();
-		$permissions = $stm->fetchObject() ?? new \stdClass();
-		unset($permissions->id, $permissions->roleName);
+		if ($stm->execute() and $permissions = $stm->fetchObject()) {
+			unset($permissions->id, $permissions->roleName);
+		} else {
+			$permissions = new stdClass();
+		}
 		return $permissions;
 	}
 
@@ -489,6 +510,8 @@ class User implements \jsonSerializable, \Serializable
 			`user_data`.`id` = `users`.`id`
 			AND `subscribers`.`id` = `users`.`id`
 		)
+		WHERE `users`.`email` = :user
+		OR `users`.`username` = :user
 		LIMIT 1;';
 	}
 }
