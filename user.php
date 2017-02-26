@@ -30,6 +30,12 @@ class User implements \jsonSerializable, \Serializable
 	use WP_Pass;
 	use Password;
 	use AES;
+	use Traits\Cookie;
+	use Traits\Serialize;
+	use Traits\Magic;
+	use Traits\Permissions;
+	use Traits\Tables;
+	use Traits\Data;
 
 	const MAGIC_PROPERTY = '_user_data';
 
@@ -51,17 +57,9 @@ class User implements \jsonSerializable, \Serializable
 
 	private $_db_creds   = null;
 
-	private $_user_data  = array();
-
-	private $_tables     = array();
-
 	public static $check_wp_pass = false;
 
 	private static $_instances = array();
-
-	public static  $expires = '+1 month';
-
-	private $_permissions;
 
 	/**
 	 * Restore instance. Creates if instances doesn't exist
@@ -93,144 +91,6 @@ class User implements \jsonSerializable, \Serializable
 	}
 
 	/**
-	 * Login using usrename/email and passowrd
-	 * @param  String $user     user@example.com or username
-	 * @param  String $password Password
-	 * @return Bool             Whether or not login was successful
-	 */
-	public function __invoke(String $user, String $password): Bool
-	{
-		$stm = $this->_pdo->prepare($this->_getQuery());
-		$stm->bindParam(':user', $user, PDO::PARAM_STR);
-		if ($stm->execute() and $data = $stm->fetchObject()) {
-			if (
-				isset($data->password)
-				and ($this->passwordVerify($password, $data->password))
-			) {
-				$this->_setData($data);
-				return true;
-			} elseif (
-				static::$check_wp_pass === true and isset($data->password)
-				and ($this->CheckPassword($password, $data->password))
-			) {
-				$hash = $this->passwordHash($password);
-				$update = $pdo->prepare(
-					'UPDATE `users`
-					SET `password` = :hash
-					WHERE `username` = :user
-					LIMIT 1;'
-				);
-				$update->bindParam(':hash', $hash);
-				$update->bindParam(':user', $data->username);
-				if ($update->execute()) {
-					$data->password = $hash;
-					$this->_setData($data);
-					return true;
-				} else {
-					trigger_error('Error updating password');
-					return false;
-				}
-			} else {
-				return false;
-			}
-		}
-		return false;
-	}
-
-	/**
-	 * Magic getter
-	 * @param  String $prop Name of property
-	 * @return Mixed        Its value
-	 */
-	public function __get(String $prop)
-	{
-		return $this->{self::MAGIC_PROPERTY}[$prop] ?? null;
-	}
-
-	/**
-	 * Magic isset method
-	 * @param  String  $prop Name of property
-	 * @return boolean       Whether or not it is set
-	 */
-	public function __isset(String $prop): Bool
-	{
-		return array_key_exists($prop, $this->{self::MAGIC_PROPERTY});
-	}
-
-	/**
-	 * Method used to convert class object to string
-	 * @return string Username
-	 */
-	public function __toString(): String
-	{
-		return $this->username;
-	}
-
-	/**
-	 * Method used when calling debugging functions, such as `var_dump`
-	 * @return Array Data array
-	 */
-	public function __debugInfo(): Array
-	{
-		return $this->_getData();
-	}
-
-	/**
-	 * Method used when converting class object to JSON using `json_encode`
-	 * @return Array Data array
-	 */
-	public function jsonSerialize(): Array
-	{
-		return $this->_getData();
-	}
-
-	/**
-	 * Class `serialize` method
-	 * @return String Serialized class data
-	 */
-	public function serialize(): String
-	{
-		$expires = is_string(static::$expires)
-			? strtotime(static::$expires)
-			: static::$expires;
-
-		$data = [
-			'username' => $this->username,
-			'tables'   => $this->_tables,
-			'db_creds' => $this->_db_creds,
-			'expires'  => $expires,
-		];
-		return serialize($data);
-	}
-
-	/**
-	 * Method used to `unserialize`
-	 * @param  String $data Serialized data
-	 * @return void
-	 */
-	public function unserialize($data)
-	{
-		$data = @unserialize($data);
-		$data = new ArrayObject($data, ArrayObject::ARRAY_AS_PROPS);
-		if (isset($data, $data->username, $data->expires, $data->db_creds, $data->tables)) {
-			static::$expires = $data->expires;
-			unset($data->expires);
-			$this->_db_creds = $data->db_creds;
-			$this->_pdo      = PDO::load($this->_db_creds);
-			$this->_tables   = $data->tables;
-			$stm = $this->_pdo->prepare($this->_getQuery());
-			$stm->bindParam(':user', $data->username, PDO::PARAM_STR);
-
-			if ($stm->execute() and $data = $stm->fetchObject()) {
-				$this->_setData($data);
-			} else {
-				$this->logout();
-			}
-			static::$_instances[$this->_db_creds] = $this;
-		}
-	}
-
-	/**
 	 * Create a user by searching for username or email
 	 * @param  String $db_creds Datbase credentials file
 	 * @param  String $query    Username or email
@@ -251,45 +111,6 @@ class User implements \jsonSerializable, \Serializable
 	}
 
 	/**
-	 * Check if a user has permission for a given action
-	 * @param  String $permission Permission being checked
-	 * @return Bool               Whether or not user has permission
-	 */
-	public function hasPermission(String $permission): Bool
-	{
-		return @isset($this->_permissions->{$permission})
-			and $this->_permissions->{$permission} === '1';
-	}
-
-	/**
-	 * Sets login cookie, optionally using encryption
-	 * @param  String $key        Sets `$_COOKIE[$key]`
-	 * @param  String $crypto_pwd Optional password to encrypt with
-	 * @return self               Return self to make chainable
-	 */
-	public function setCookie(String $key = self::KEY, String $crypto_pwd = null): self
-	{
-		if (is_string($crypto_pwd)) {
-			$cookie = static::encrypt(@serialize($this), $crypto_pwd);
-		} else {
-			$cookie = base64_encode(@serialize($this));
-		}
-		static::_cookie($key, $cookie, static::$expires);
-		return $this;
-	}
-
-	/**
-	 * Save to session
-	 * @param  String $key Sets `$_SESSION[$key]`
-	 * @return self        Return self to make chainable
-	 */
-	public function setSession(String $key = self::KEY): self
-	{
-		$_SESSION[$key] = @serialize($this);
-		return $this;
-	}
-
-	/**
 	 * Logs a user out, clearing data
 	 * @param  String $key `$_COOKIE[$key]` and `$_SESSION[$key]`
 	 * @return self        Return self to make chainable
@@ -307,43 +128,6 @@ class User implements \jsonSerializable, \Serializable
 		$this->password = null;
 		$this->{self::MAGIC_PROPERTY} = array();
 		return $this;
-	}
-
-	/**
-	 * Checks if a MySQL table is set to be used for setting user data
-	 * @param  String $table Name of table
-	 * @return Bool          Whether or not is has already been added
-	 */
-	public function hasTable(String $table): Bool
-	{
-		return in_array($table, $this->_tables);
-	}
-
-	/**
-	 * Retrieves a list of all extra MySQL tables used for user data
-	 * @return Array [table1, ...]
-	 */
-	public function getTables(): Array
-	{
-		return array_map(function($table)
-		{
-			return sprintf('`%s`', preg_replace('/[^\w\- ]/', null, $table));
-		}, $this->_tables);
-	}
-
-	/**
-	 * Adds a MySQL table to the list of tables used for user data
-	 * @param  String $table Name of table
-	 * @return Bool          Whether or not it was appended to the list
-	 */
-	public function addTable(String $table): Bool
-	{
-		if (! $this->hasTable($table)) {
-			array_push($this->_tables, $table);
-			return true;
-		} else {
-			return false;
-		}
 	}
 
 	/**
@@ -402,98 +186,6 @@ class User implements \jsonSerializable, \Serializable
 			}
 			return $user;
 		}
-	}
-
-	/**
-	 * Private method for setting cookies more easily
-	 * @param  String  $key     Cookie name
-	 * @param  String  $value   Value to set it to
-	 * @param  Mixed   $expires Expiration timestamp
-	 * @return Bool             Whether or not the cookie was set
-	 */
-	private static function _cookie(String $key, String $value = null, $expires = 1): Bool
-	{
-		if (isset($value)) {
-			$_COOKIE[$key] = $value;
-		} else {
-			unset($_COOKIE[$key]);
-		}
-
-		return setcookie(
-			$key,
-			$value,
-			is_string($expires) ? strtotime($expires) : $expires,
-			'/',
-			$_SERVER['HTTP_HOST'],
-			array_key_exists('HTTPS', $_SERVER),
-			true
-		);
-	}
-
-	/**
-	 * Does timestamp comparision
-	 * @param  Mixed   $expires Expiration timestamp or date string
-	 * @return Bool             Whether or not it is less than current time
-	 */
-	private static function _isExpired($expires): Bool
-	{
-		if (is_int($expires)) {
-			return $expires < time();
-		} elseif (is_string($expires)) {
-			return strtotime($expires) < time();
-		} else {
-			return true;
-		}
-	}
-
-	/**
-	 * Private method for retrieving data
-	 * @return Array Data to be shared, such as for `jsonSerialize`
-	 */
-	private function _getData(): Array
-	{
-		return array_merge([
-			'id'       => $this->id,
-			'username' => $this->username,
-			'email'    => $this->email,
-		], $this->{self::MAGIC_PROPERTY});
-	}
-
-	/**
-	 * Private method for setting data
-	 * @param Array $data Data, such as from a SQL query
-	 */
-	private function _setData(stdClass $data)
-	{
-		$this->id       = $data->id;
-		$this->username = $data->username;
-		$this->email    = $data->email;
-		$this->password = $data->password;
-		unset($data->id ,$data->username, $data->email, $data->password);
-		$this->_permissions = $this->_getPermsissions($data->status);
-		$this->{self::MAGIC_PROPERTY} = get_object_vars($data);
-	}
-
-	/**
-	 * Retrieves permissions from `permissions` table and returns as object
-	 * @param  Int       $role_id `subscribers`.`status`
-	 * @return stdClass           {"$permissionName": "1" || "0", ...}
-	 */
-	private function _getPermsissions(Int $role_id): stdClass
-	{
-		$stm = $this->_pdo->prepare(
-			'SELECT *
-			FROM `permissions`
-			WHERE `id` = :role
-			LIMIT 1;'
-		);
-		$stm->bindParam(':role', $role_id);
-		if ($stm->execute() and $permissions = $stm->fetchObject()) {
-			unset($permissions->id, $permissions->roleName);
-		} else {
-			$permissions = new stdClass();
-		}
-		return $permissions;
 	}
 
 	/**
