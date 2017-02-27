@@ -100,7 +100,7 @@ class User implements \jsonSerializable, \Serializable
 	{
 		$user = new self($db_creds);
 		$stm = $user->_pdo->prepare($user->_getQuery());
-		$stm->bindParam(':user', $query);
+		$stm->bindParam(':user', strtolower($query));
 		$stm->execute();
 
 		if ($data = $stm->fetchObject()) {
