@@ -11,6 +11,7 @@ trait Magic
 	 */
 	public function __invoke(String $user, String $password): Bool
 	{
+		$user = strtolower($user);
 		$stm = $this->_pdo->prepare($this->_getQuery());
 		$stm->bindParam(':user', $user, PDO::PARAM_STR);
 		if ($stm->execute() and $data = $stm->fetchObject()) {
@@ -18,6 +19,9 @@ trait Magic
 				isset($data->password)
 				and ($this->passwordVerify($password, $data->password))
 			) {
+				if (static::passwordNeedsRehash($data->password)) {
+					$this->updatePassword($password);
+				}
 				$this->_setData($data);
 				return true;
 			} elseif (
