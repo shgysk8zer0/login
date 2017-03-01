@@ -133,28 +133,35 @@ class User implements \jsonSerializable, \Serializable
 	/**
 	 * Update password for user
 	 * @param  String $password The new password
+	 * @param  String $username Optional username of user. Defaults to current user
 	 * @return Bool             Whether or not the transaction was successful
 	 */
-	public function updatePassword(String $password): Bool
+	public function updatePassword(String $password, String $username = null): Bool
 	{
+		if (is_null($username) and isset($this->username)) {
+			$username = $this->username;
+		}
 		$this->_pdo->beginTransaction();
 		try {
 			$stm = $this->_pdo->prepare(
 				'UPDATE `users`
 				SET `password`   = :pass
-				WHERE `username` = :user
+				WHERE `email` = :user OR `username` = :user
 				LIMIT 1;'
 			);
-			$stm->bindParam(':user', $this->username);
 			$hash = static::passwordHash($password);
+			$stm->bindParam(':user', $username);
 			$stm->bindParam(':pass', $hash);
-			if ($stm->execute() and $this($this->username, $password)) {
+			if (
+				$stm->execute()
+				and intval($stm->errorCode()) === 0
+				and $stm->rowCount() === 1
+			) {
 				return $this->_pdo->commit();
 			} else {
 				throw new \RuntimeException('Error updating password');
 			}
 		} catch (\Throwable $e) {
-			$this->_pdo->rollBack();
 			trigger_error($e->getMessage());
 			return false;
 		}
