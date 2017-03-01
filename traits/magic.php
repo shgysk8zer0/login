@@ -26,25 +26,11 @@ trait Magic
 				return true;
 			} elseif (
 				static::$check_wp_pass === true and isset($data->password)
-				and ($this->CheckPassword($password, $data->password))
+				and $this->CheckPassword($password, $data->password)
+				and $this->updatePassword($password, $user)
 			) {
-				$hash = $this->passwordHash($password);
-				$update = $pdo->prepare(
-					'UPDATE `users`
-					SET `password` = :hash
-					WHERE `username` = :user
-					LIMIT 1;'
-				);
-				$update->bindParam(':hash', $hash);
-				$update->bindParam(':user', $data->username);
-				if ($update->execute()) {
-					$data->password = $hash;
-					$this->_setData($data);
-					return true;
-				} else {
-					trigger_error('Error updating password');
-					return false;
-				}
+				$this->_setData($data);
+				return true;
 			} else {
 				return false;
 			}
