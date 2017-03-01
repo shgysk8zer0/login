@@ -4,6 +4,7 @@ namespace shgysk8zer0\Login;
 
 trait WP_Pass
 {
+	private $itoa64 = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 	final private function crypt_private($password, $setting)
 	{
 		$output = '*0';
